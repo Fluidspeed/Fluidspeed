@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPLv3
 pragma solidity >= 0.8.0;
 
-import { ISuperAgreement } from "../superfluid/ISuperAgreement.sol";
-import { ISuperfluidToken } from "../superfluid/ISuperfluidToken.sol";
+import { ISuperAgreement } from "../fluifspeed/ISuperAgreement.sol";
+import { IFluidspeedToken } from "../fluifspeed/IFluidspeedToken.sol";
 
 
 abstract contract IConstantFlowAgreementV1 is ISuperAgreement {
