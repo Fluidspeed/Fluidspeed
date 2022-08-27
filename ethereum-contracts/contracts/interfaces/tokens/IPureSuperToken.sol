@@ -9,6 +9,6 @@ interface IPureSuperTokenCustom {
 
 /**
  * @title Pure Super Token interface
- * @author Superfluid
+ * @author Fluidspeed
  */
 interface IPureSuperToken is IPureSuperTokenCustom, ISuperToken {}
