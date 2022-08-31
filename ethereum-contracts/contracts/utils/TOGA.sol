@@ -168,7 +168,27 @@ contract TOGA is ITOGAv2, IERC777Recipient {
         );
     }
 
-    
+    function capToInt96(int256 value) internal pure returns(int96) {
+        return value < type(int96).max ? int96(value) : type(int96).max;
+    }
+
+    function getDefaultExitRateFor(ISuperToken /*token*/, uint256 bondAmount)
+        public view override
+        returns(int96 exitRate)
+    {
+        return capToInt96((bondAmount / (minBondDuration * 4)).toInt256());
+    }
+
+    function getMaxExitRateFor(ISuperToken /*token*/, uint256 bondAmount)
+        external view override
+        returns(int96 exitRate)
+    {
+        return capToInt96((bondAmount / minBondDuration).toInt256());
+    }
+
+    function withdrawFundsInCustody(ISuperToken token) external override {
+        custodian.flush(token, msg.sender);
+    }
 
     // ============ internal ============
 
