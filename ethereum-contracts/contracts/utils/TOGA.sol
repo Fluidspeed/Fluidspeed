@@ -186,6 +186,63 @@ contract TOGA is ITOGAv2, IERC777Recipient {
         return capToInt96((bondAmount / minBondDuration).toInt256());
     }
 
+    function changeExitRate(ISuperToken token, int96 newExitRate) external override {
+        address currentPICAddr = _currentPICs[token].addr;
+        require(msg.sender == currentPICAddr, "TOGA: only PIC allowed");
+        require(newExitRate >= 0, "TOGA: negative exitRate not allowed");
+        require(uint256(int256(newExitRate)) * minBondDuration <= _getCurrentPICBond(token), "TOGA: exitRate too high");
+
+        (, int96 curExitRate,,) = _cfa.getFlow(token, address(this), currentPICAddr);
+        if (curExitRate > 0 && newExitRate > 0) {
+            // need to update existing flow
+            _host.callAgreement(
+                _cfa,
+                abi.encodeCall(
+                    _cfa.updateFlow,
+                    (
+                        token,
+                        currentPICAddr,
+                        newExitRate,
+                        new bytes(0)
+                    )
+                ),
+                "0x"
+            );
+        } else if (curExitRate == 0 && newExitRate > 0) {
+            // no pre-existing flow, need to create
+            _host.callAgreement(
+                _cfa,
+                abi.encodeCall(
+                    _cfa.createFlow,
+                    (
+                        token,
+                        currentPICAddr,
+                        newExitRate,
+                        new bytes(0)
+                    )
+                ),
+                "0x"
+            );
+        } else if (curExitRate > 0 && newExitRate == 0) {
+            // need to close existing flow
+            _host.callAgreement(
+                _cfa,
+                abi.encodeCall(
+                    _cfa.deleteFlow,
+                    (
+                        token,
+                        address(this),
+                        currentPICAddr,
+                        new bytes(0)
+                    )
+                ),
+                "0x"
+            );
+        } // else do nothing (no existing flow, newExitRate == 0)
+
+        emit ExitRateChanged(token, newExitRate);
+    }
+    
     function withdrawFundsInCustody(ISuperToken token) external override {
         custodian.flush(token, msg.sender);
     }
