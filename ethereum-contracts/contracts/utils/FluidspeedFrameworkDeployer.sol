@@ -122,24 +122,7 @@ contract FluidspeedFrameworkDeployer {
         resolver.set("FluidspeedLoader-v1", address(fluidspeedLoader));
     }
 
-    /// @notice Fetches the framework contracts
-    function getFramework()
-        external view
-        returns (Framework memory sf)
-    {
-        sf = Framework({
-            governance: governance,
-            host: host,
-            cfa: cfa,
-            cfaLib: CFAv1Library.InitData(host, cfa),
-            ida: ida,
-            idaLib: IDAv1Library.InitData(host, ida),
-            superTokenFactory: superTokenFactory,
-            resolver: resolver,
-            fluidspeedLoader: fluidspeedLoader
-        });
-        return sf;
-    }
+    
 
     /// @notice Deploy new wrapper super token
     function deployWrapperSuperToken(string calldata name, string calldata symbol)
