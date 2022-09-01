@@ -32,5 +32,24 @@ contract FluidspeedLoader {
         _resolver = resolver;
     }
 
-    
+    /**
+     * @dev Load framework objects
+     * @param releaseVersion Protocol release version of the deployment
+     */
+    function loadFramework(string calldata releaseVersion)
+        external view
+        returns (Framework memory result)
+    {
+        // load fluidspeed host contract
+        result.fluidspeed = IFluidspeed(_resolver.get(
+            string.concat("Fluidspeed.", releaseVersion)
+        ));
+        result.superTokenFactory = result.fluidspeed.getSuperTokenFactory();
+        result.agreementCFAv1 = result.fluidspeed.getAgreementClass(
+            keccak256("org.fluidspeed-finance.agreements.ConstantFlowAgreement.v1")
+        );
+        result.agreementIDAv1 = result.fluidspeed.getAgreementClass(
+            keccak256("org.fluidspeed-finance.agreements.InstantDistributionAgreement.v1")
+        );
+    }
 }
