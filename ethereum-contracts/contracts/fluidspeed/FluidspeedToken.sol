@@ -337,5 +337,54 @@ abstract contract FluidspeedToken is IFluidspeedToken
     {
         _sharedSettledBalances[account] = _sharedSettledBalances[account] + delta;
     }
+/// @dev IFluidspeedToken.makeLiquidationPayoutsV2 implementation
+    function makeLiquidationPayoutsV2(
+        bytes32 id,
+        bytes memory liquidationTypeData,
+        address liquidatorAccount, // the address executing the liquidation
+        bool useDefaultRewardAccount, // Whether or not the default reward account receives the rewardAmount
+        address targetAccount, // Account to be liquidated
+        uint256 rewardAmount, // The amount the rewarded account will receive
+        int256 targetAccountBalanceDelta // The delta amount the target account balance should change by
+    ) external override onlyAgreement {
+        address rewardAccount = _getRewardAccount();
 
+        // we set the rewardAccount to the user who executed the liquidation if
+        // no rewardAccount is set (aka. ANARCHY MODE - should not occur in reality, for testing purposes)
+        if (rewardAccount == address(0)) {
+            rewardAccount = liquidatorAccount;
+        }
+
+        address rewardAmountReceiver = useDefaultRewardAccount ? rewardAccount : liquidatorAccount;
+
+        if (targetAccountBalanceDelta <= 0) {
+            // LIKELY BRANCH: target account pays penalty to rewarded account
+            assert(rewardAmount.toInt256() == -targetAccountBalanceDelta);
+
+            _sharedSettledBalances[rewardAmountReceiver] += rewardAmount.toInt256();
+            _sharedSettledBalances[targetAccount] += targetAccountBalanceDelta;
+            EventsEmitter.emitTransfer(targetAccount, rewardAmountReceiver, rewardAmount);
+        } else {
+            // LESS LIKELY BRANCH: target account is bailed out
+            // NOTE: useDefaultRewardAccount being true is undefined behavior
+            // because the default reward account isn't receiving the rewardAmount by default
+            assert(!useDefaultRewardAccount);
+            _sharedSettledBalances[rewardAccount] -= (rewardAmount.toInt256() + targetAccountBalanceDelta);
+            _sharedSettledBalances[liquidatorAccount] += rewardAmount.toInt256();
+            _sharedSettledBalances[targetAccount] += targetAccountBalanceDelta;
+            EventsEmitter.emitTransfer(rewardAccount, liquidatorAccount, rewardAmount);
+            EventsEmitter.emitTransfer(rewardAccount, targetAccount, uint256(targetAccountBalanceDelta));
+        }
+
+        emit AgreementLiquidatedV2(
+            msg.sender,
+            id,
+            liquidatorAccount,
+            targetAccount,
+            rewardAmountReceiver,
+            rewardAmount,
+            targetAccountBalanceDelta,
+            liquidationTypeData
+        );
+    }
 }
