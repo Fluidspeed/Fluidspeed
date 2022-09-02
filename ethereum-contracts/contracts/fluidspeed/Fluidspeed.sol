@@ -873,5 +873,237 @@ contract Fluidspeed is
             }
         }
     }
+     /// @dev IFluidspeed.batchCall implementation
+    function batchCall(
+       Operation[] calldata operations
+    )
+       external override
+    {
+        _batchCall(msg.sender, operations);
+    }
 
+    /// @dev IFluidspeed.forwardBatchCall implementation
+    function forwardBatchCall(Operation[] calldata operations)
+        external override
+    {
+        _batchCall(_getTransactionSigner(), operations);
+    }
+
+    /// @dev BaseRelayRecipient.isTrustedForwarder implementation
+    function isTrustedForwarder(address forwarder)
+        public view override
+        returns(bool)
+    {
+        return _gov.getConfigAsUint256(
+            this,
+            IFluidspeedToken(address(0)),
+            FluidspeedGovernanceConfigs.getTrustedForwarderConfigKey(forwarder)
+        ) != 0;
+    }
+
+    /// @dev IRelayRecipient.isTrustedForwarder implementation
+    function versionRecipient()
+        external override pure
+        returns (string memory)
+    {
+        return "v1";
+    }
+
+    /**************************************************************************
+    * Internal
+    **************************************************************************/
+
+    function _jailApp(ISuperApp app, uint256 reason)
+        internal
+    {
+        if ((_appManifests[app].configWord & SuperAppDefinitions.APP_JAIL_BIT) == 0) {
+            _appManifests[app].configWord |= SuperAppDefinitions.APP_JAIL_BIT;
+            emit Jail(app, reason);
+        }
+    }
+
+    function _updateContext(Context memory context)
+        private
+        returns (bytes memory ctx)
+    {
+        if (context.appCallbackLevel > MAX_APP_CALLBACK_LEVEL) {
+            revert FluidspeedErrors.APP_RULE(SuperAppDefinitions.APP_RULE_MAX_APP_LEVEL_REACHED);
+        }
+        uint256 callInfo = ContextDefinitions.encodeCallInfo(context.appCallbackLevel, context.callType);
+        uint256 creditIO =
+            context.appCreditGranted.toUint128() |
+            (uint256(context.appCreditWantedDeprecated.toUint128()) << 128);
+        // NOTE: nested encoding done due to stack too deep error when decoding in _decodeCtx
+        ctx = abi.encode(
+            abi.encode(
+                callInfo,
+                context.timestamp,
+                context.msgSender,
+                context.agreementSelector,
+                context.userData
+            ),
+            abi.encode(
+                creditIO,
+                context.appCreditUsed,
+                context.appAddress,
+                context.appCreditToken
+            )
+        );
+        _ctxStamp = keccak256(ctx);
+    }
+
+    function _decodeCtx(bytes memory ctx)
+        private pure
+        returns (Context memory context)
+    {
+        bytes memory ctx1;
+        bytes memory ctx2;
+        (ctx1, ctx2) = abi.decode(ctx, (bytes, bytes));
+        {
+            uint256 callInfo;
+            (
+                callInfo,
+                context.timestamp,
+                context.msgSender,
+                context.agreementSelector,
+                context.userData
+            ) = abi.decode(ctx1, (
+                uint256,
+                uint256,
+                address,
+                bytes4,
+                bytes));
+            (context.appCallbackLevel, context.callType) = ContextDefinitions.decodeCallInfo(callInfo);
+        }
+        {
+            uint256 creditIO;
+            (
+                creditIO,
+                context.appCreditUsed,
+                context.appAddress,
+                context.appCreditToken
+            ) = abi.decode(ctx2, (
+                uint256,
+                int256,
+                address,
+                IFluidspeedToken));
+            context.appCreditGranted = creditIO & type(uint128).max;
+            context.appCreditWantedDeprecated = creditIO >> 128;
+        }
+    }
+
+    function _isCtxValid(bytes memory ctx) private view returns (bool) {
+        return ctx.length != 0 && keccak256(ctx) == _ctxStamp;
+    }
+
+    function _callExternalWithReplacedCtx(
+        address target,
+        bytes memory callData,
+        bytes memory ctx
+    )
+        private
+        returns(bool success, bytes memory returnedData)
+    {
+        assert(target != address(0));
+
+        // STEP 1 : replace placeholder ctx with actual ctx
+        callData = _replacePlaceholderCtx(callData, ctx);
+
+        // STEP 2: Call external with replaced context
+        /* solhint-disable-next-line avoid-low-level-calls */
+        (success, returnedData) = target.call(callData);
+        // if target is not a contract or some arbitrary address,
+        // success will be true and returnedData will be 0x (length = 0)
+        // this leads to unintended behaviors, so we want to check to ensure
+        // that the length of returnedData is greater than 0
+
+        if (success) {
+            if (returnedData.length == 0) {
+                revert FluidspeedErrors.APP_RULE(SuperAppDefinitions.APP_RULE_CTX_IS_MALFORMATED);
+            }
+        }
+    }
+
+    function _callCallback(
+        ISuperApp app,
+        bool isStaticall,
+        bool isTermination,
+        bytes memory callData,
+        bytes memory ctx
+    )
+        private
+        returns(bool success, bytes memory returnedData)
+    {
+        assert(address(app) != address(0));
+
+        callData = _replacePlaceholderCtx(callData, ctx);
+
+        uint256 gasLeftBefore = gasleft();
+        if (isStaticall) {
+            /* solhint-disable-next-line avoid-low-level-calls*/
+            (success, returnedData) = address(app).staticcall{ gas: CALLBACK_GAS_LIMIT }(callData);
+        } else {
+            /* solhint-disable-next-line avoid-low-level-calls*/
+            (success, returnedData) = address(app).call{ gas: CALLBACK_GAS_LIMIT }(callData);
+        }
+
+        if (!success) {
+            // "/ 63" is a magic to avoid out of gas attack. 
+            // See https://medium.com/@wighawag/ethereum-the-concept-of-gas-and-its-dangers-28d0eb809bb2.
+            // A callback may use this to block the APP_RULE_NO_REVERT_ON_TERMINATION_CALLBACK jail rule.
+            if (gasleft() > gasLeftBefore / 63) {
+                if (!isTermination) {
+                    CallUtils.revertFromReturnedData(returnedData);
+                } else {
+                    _jailApp(app, SuperAppDefinitions.APP_RULE_NO_REVERT_ON_TERMINATION_CALLBACK);
+                }
+            } else {
+                // For legit out of gas issue, the call may still fail if more gas is provided
+                // and this is okay, because there can be incentive to jail the app by providing
+                // more gas.
+                revert("SF: need more gas");
+            }
+        }
+    }
+
+    /**
+     * @dev Replace the placeholder ctx with the actual ctx
+     */
+    function _replacePlaceholderCtx(bytes memory data, bytes memory ctx)
+        internal pure
+        returns (bytes memory dataWithCtx)
+    {
+        // 1.a ctx needs to be padded to align with 32 bytes boundary
+        uint256 dataLen = data.length;
+
+        // Double check if the ctx is a placeholder ctx
+        //
+        // NOTE: This can't check all cases - user can still put nonzero length of zero data
+        // developer experience check. So this is more like a sanity check for clumsy app developers.
+        //
+        // So, agreements MUST NOT TRUST the ctx passed to it, and always use the isCtxValid first.
+        {
+            uint256 placeHolderCtxLength;
+            // NOTE: len(data) is data.length + 32 https://docs.soliditylang.org/en/latest/abi-spec.html
+            // solhint-disable-next-line no-inline-assembly
+            assembly { placeHolderCtxLength := mload(add(data, dataLen)) }
+            if (placeHolderCtxLength != 0) revert HOST_NON_ZERO_LENGTH_PLACEHOLDER_CTX();
+        }
+
+        // 1.b remove the placeholder ctx
+        // solhint-disable-next-line no-inline-assembly
+        assembly { mstore(data, sub(dataLen, 0x20)) }
+
+        // 1.c pack data with the replacement ctx
+        return abi.encodePacked(
+            data,
+            // bytes with padded length
+            uint256(ctx.length),
+            ctx, new bytes(CallUtils.padLength32(ctx.length) - ctx.length) // ctx padding
+        );
+        // NOTE: the alternative placeholderCtx is passing extra calldata to the agreements
+        // agreements would use assembly code to read the ctx
+        // Because selector is part of calldata, we do the padding internally, instead of
+        // outside
+    }
 }
