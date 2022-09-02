@@ -728,5 +728,150 @@ contract Fluidspeed is
         // clear the stamp
         _ctxStamp = 0;
     }
+    function callAppAction(
+        ISuperApp app,
+        bytes memory callData
+    )
+        external override // NOTE: modifiers are called in _callAppAction
+        returns(bytes memory returnedData)
+    {
+        return _callAppAction(msg.sender, app, callData);
+    }
+
+    /**************************************************************************
+     * Contextual Call Proxies
+     *************************************************************************/
+
+    function callAgreementWithContext(
+        ISuperAgreement agreementClass,
+        bytes calldata callData,
+        bytes calldata userData,
+        bytes calldata ctx
+    )
+        external override
+        requireValidCtx(ctx)
+        isAgreement(agreementClass)
+        returns (bytes memory newCtx, bytes memory returnedData)
+    {
+        Context memory context = decodeCtx(ctx);
+        if (context.appAddress != msg.sender) revert HOST_CALL_AGREEMENT_WITH_CTX_FROM_WRONG_ADDRESS();
+
+        address oldSender = context.msgSender;
+        context.msgSender = msg.sender;
+        //context.agreementSelector =;
+        context.userData = userData;
+        newCtx = _updateContext(context);
+
+        bool success;
+        (success, returnedData) = _callExternalWithReplacedCtx(address(agreementClass), callData, newCtx);
+        if (success) {
+            (newCtx) = abi.decode(returnedData, (bytes));
+            assert(_isCtxValid(newCtx));
+            // back to old msg.sender
+            context = decodeCtx(newCtx);
+            context.msgSender = oldSender;
+            newCtx = _updateContext(context);
+        } else {
+            CallUtils.revertFromReturnedData(returnedData);
+        }
+    }
+
+    function callAppActionWithContext(
+        ISuperApp app,
+        bytes calldata callData,
+        bytes calldata ctx
+    )
+        external override
+        requireValidCtx(ctx)
+        isAppActive(app)
+        isValidAppAction(callData)
+        returns(bytes memory newCtx)
+    {
+        Context memory context = decodeCtx(ctx);
+        if (context.appAddress != msg.sender) revert HOST_CALL_APP_ACTION_WITH_CTX_FROM_WRONG_ADDRESS();
+
+        address oldSender = context.msgSender;
+        context.msgSender = msg.sender;
+        newCtx = _updateContext(context);
+
+        (bool success, bytes memory returnedData) = _callExternalWithReplacedCtx(address(app), callData, newCtx);
+        if (success) {
+            (newCtx) = abi.decode(returnedData, (bytes));
+            if (!_isCtxValid(newCtx)) revert FluidspeedErrors.APP_RULE(SuperAppDefinitions.APP_RULE_CTX_IS_READONLY);
+            // back to old msg.sender
+            context = decodeCtx(newCtx);
+            context.msgSender = oldSender;
+            newCtx = _updateContext(context);
+        } else {
+            CallUtils.revertFromReturnedData(returnedData);
+        }
+    }
+
+    function decodeCtx(bytes memory ctx)
+        public pure override
+        returns (Context memory context)
+    {
+        return _decodeCtx(ctx);
+    }
+
+    function isCtxValid(bytes calldata ctx)
+        external view override
+        returns (bool)
+    {
+        return _isCtxValid(ctx);
+    }
+
+    /**************************************************************************
+    * Batch call
+    **************************************************************************/
+
+    function _batchCall(
+        address msgSender,
+        Operation[] calldata operations
+    )
+       internal
+    {
+        for (uint256 i = 0; i < operations.length; ++i) {
+            uint32 operationType = operations[i].operationType;
+            if (operationType == BatchOperation.OPERATION_TYPE_ERC20_APPROVE) {
+                (address spender, uint256 amount) =
+                    abi.decode(operations[i].data, (address, uint256));
+                ISuperToken(operations[i].target).operationApprove(
+                    msgSender,
+                    spender,
+                    amount);
+            } else if (operationType == BatchOperation.OPERATION_TYPE_ERC20_TRANSFER_FROM) {
+                (address sender, address receiver, uint256 amount) =
+                    abi.decode(operations[i].data, (address, address, uint256));
+                ISuperToken(operations[i].target).operationTransferFrom(
+                    msgSender,
+                    sender,
+                    receiver,
+                    amount);
+            } else if (operationType == BatchOperation.OPERATION_TYPE_SUPERTOKEN_UPGRADE) {
+                ISuperToken(operations[i].target).operationUpgrade(
+                    msgSender,
+                    abi.decode(operations[i].data, (uint256)));
+            } else if (operationType == BatchOperation.OPERATION_TYPE_SUPERTOKEN_DOWNGRADE) {
+                ISuperToken(operations[i].target).operationDowngrade(
+                    msgSender,
+                    abi.decode(operations[i].data, (uint256)));
+            } else if (operationType == BatchOperation.OPERATION_TYPE_SUPERFLUID_CALL_AGREEMENT) {
+                (bytes memory callData, bytes memory userData) = abi.decode(operations[i].data, (bytes, bytes));
+                _callAgreement(
+                    msgSender,
+                    ISuperAgreement(operations[i].target),
+                    callData,
+                    userData);
+            } else if (operationType == BatchOperation.OPERATION_TYPE_SUPERFLUID_CALL_APP_ACTION) {
+                _callAppAction(
+                    msgSender,
+                    ISuperApp(operations[i].target),
+                    operations[i].data);
+            } else {
+               revert HOST_UNKNOWN_BATCH_CALL_OPERATION_TYPE();
+            }
+        }
+    }
 
 }
