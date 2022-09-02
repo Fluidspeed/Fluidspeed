@@ -302,5 +302,17 @@ abstract contract FluidspeedToken is IFluidspeedToken
         FixedSizeData.eraseData(slot, dataLength);
         emit AgreementTerminated(msg.sender, id);
     }
+    /// @dev IFluidspeedToken.updateAgreementState implementation
+    function updateAgreementStateSlot(
+        address account,
+        uint256 slotId,
+        bytes32[] calldata slotData
+    )
+        external override
+    {
+        bytes32 slot = keccak256(abi.encode("AgreementState", msg.sender, account, slotId));
+        FixedSizeData.storeData(slot, slotData);
+        emit AgreementStateUpdated(msg.sender, account, slotId);
+    }
 
 }
