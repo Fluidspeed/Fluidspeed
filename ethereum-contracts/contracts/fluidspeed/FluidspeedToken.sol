@@ -241,5 +241,38 @@ abstract contract FluidspeedToken is IFluidspeedToken
         IFluidspeedGovernance gov = _host.getGovernance();
         rewardAccount = gov.getConfigAsAddress(_host, this, _REWARD_ADDRESS_CONFIG_KEY);
     }
+	
+/**************************************************************************
+     * Super Agreement hosting functions
+     *************************************************************************/
+
+    /// @dev IFluidspeedToken.createAgreement implementation
+    function createAgreement(
+        bytes32 id,
+        bytes32[] calldata data
+    )
+        external override
+    {
+        address agreementClass = msg.sender;
+        bytes32 slot = keccak256(abi.encode("AgreementData", agreementClass, id));
+        if (FixedSizeData.hasData(slot, data.length)) {
+            revert FluidspeedErrors.ALREADY_EXISTS(FluidspeedErrors.SF_TOKEN_AGREEMENT_ALREADY_EXISTS);
+        }
+        FixedSizeData.storeData(slot, data);
+        emit AgreementCreated(agreementClass, id, data);
+    }
+
+    /// @dev IFluidspeedToken.getAgreementData implementation
+    function getAgreementData(
+        address agreementClass,
+        bytes32 id,
+        uint dataLength
+    )
+        external view override
+        returns(bytes32[] memory data)
+    {
+        bytes32 slot = keccak256(abi.encode("AgreementData", agreementClass, id));
+        data = FixedSizeData.loadData(slot, dataLength);
+    }
 
 }
