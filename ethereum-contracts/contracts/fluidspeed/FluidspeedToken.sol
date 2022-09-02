@@ -314,5 +314,28 @@ abstract contract FluidspeedToken is IFluidspeedToken
         FixedSizeData.storeData(slot, slotData);
         emit AgreementStateUpdated(msg.sender, account, slotId);
     }
+/// @dev IFluidspeedToken.getAgreementState implementation
+    function getAgreementStateSlot(
+        address agreementClass,
+        address account,
+        uint256 slotId,
+        uint dataLength
+    )
+        external override view
+        returns (bytes32[] memory slotData) {
+        bytes32 slot = keccak256(abi.encode("AgreementState", agreementClass, account, slotId));
+        slotData = FixedSizeData.loadData(slot, dataLength);
+    }
+
+    /// @dev IFluidspeedToken.settleBalance implementation
+    function settleBalance(
+        address account,
+        int256 delta
+    )
+        external override
+        onlyAgreement
+    {
+        _sharedSettledBalances[account] = _sharedSettledBalances[account] + delta;
+    }
 
 }
