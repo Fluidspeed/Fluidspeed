@@ -274,5 +274,33 @@ abstract contract FluidspeedToken is IFluidspeedToken
         bytes32 slot = keccak256(abi.encode("AgreementData", agreementClass, id));
         data = FixedSizeData.loadData(slot, dataLength);
     }
+/// @dev IFluidspeedToken.updateAgreementData implementation
+    function updateAgreementData(
+        bytes32 id,
+        bytes32[] calldata data
+    )
+        external override
+    {
+        address agreementClass = msg.sender;
+        bytes32 slot = keccak256(abi.encode("AgreementData", agreementClass, id));
+        FixedSizeData.storeData(slot, data);
+        emit AgreementUpdated(msg.sender, id, data);
+    }
+
+    /// @dev IFluidspeedToken.terminateAgreement implementation
+    function terminateAgreement(
+        bytes32 id,
+        uint dataLength
+    )
+        external override
+    {
+        address agreementClass = msg.sender;
+        bytes32 slot = keccak256(abi.encode("AgreementData", agreementClass, id));
+        if (!FixedSizeData.hasData(slot,dataLength)) {
+            revert FluidspeedErrors.DOES_NOT_EXIST(FluidspeedErrors.SF_TOKEN_AGREEMENT_DOES_NOT_EXIST);
+        }
+        FixedSizeData.eraseData(slot, dataLength);
+        emit AgreementTerminated(msg.sender, id);
+    }
 
 }
