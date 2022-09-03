@@ -21,14 +21,21 @@ abstract contract UUPSProxiable is Initializable {
    
     function proxiableUUID() public view virtual returns (bytes32);
 
-    function setImplementation(address codeAddress) internal {
-        assembly {
-            // solium-disable-line
-            sstore(
-                _IMPLEMENTATION_SLOT,
-                codeAddress
-            )
-        }
+    
+    function _updateCodeAddress(address newAddress) internal
+    {
+        // require UUPSProxy.initializeProxy first
+        require(UUPSUtils.implementation() != address(0), "UUPSProxiable: not upgradable");
+        require(
+            proxiableUUID() == UUPSProxiable(newAddress).proxiableUUID(),
+            "UUPSProxiable: not compatible logic"
+        );
+        require(
+            address(this) != newAddress,
+            "UUPSProxiable: proxy loop"
+        );
+        UUPSUtils.setImplementation(newAddress);
+        emit CodeUpdated(proxiableUUID(), newAddress);
     }
     
     event CodeUpdated(bytes32 uuid, address codeAddress);
