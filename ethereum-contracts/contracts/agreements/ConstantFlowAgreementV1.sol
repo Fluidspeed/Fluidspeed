@@ -1308,4 +1308,199 @@ contract ConstantFlowAgreementV1 is
         }
     }
 
+    /**************************************************************************
+     * Deposit Calculation Pure Functions
+     *************************************************************************/
+
+    function _clipDepositNumberRoundingDown(uint256 deposit)
+        internal pure
+        returns(uint256)
+    {
+        return ((deposit >> 32)) << 32;
+    }
+
+    function _clipDepositNumberRoundingUp(uint256 deposit)
+        internal pure
+        returns(uint256)
+    {
+        // clipping the value, rounding up
+        uint256 rounding = (deposit & type(uint32).max) > 0 ? 1 : 0;
+        return ((deposit >> 32) + rounding) << 32;
+    }
+
+    function _calculateDeposit(
+        int96 flowRate,
+        uint256 liquidationPeriod
+    )
+        internal pure
+        returns(uint256 deposit)
+    {
+        if (flowRate == 0) return 0;
+
+        // NOTE: safecast for int96 with extra assertion
+        assert(liquidationPeriod <= uint256(int256(type(int96).max)));
+        deposit = uint256(int256(flowRate * int96(uint96(liquidationPeriod))));
+        return _clipDepositNumberRoundingUp(deposit);
+    }
+
+    /**************************************************************************
+     * Flow Data Pure Functions
+     *************************************************************************/
+
+    function _generateFlowId(address sender, address receiver) private pure returns(bytes32 id) {
+        return keccak256(abi.encode(sender, receiver));
+    }
+
+    //
+    // Data packing:
+    //
+    // WORD A: | timestamp  | flowRate | deposit | owedDeposit |
+    //         | 32b        | 96b      | 64      | 64          |
+    //
+    // NOTE:
+    // - flowRate has 96 bits length
+    // - deposit has 96 bits length too, but 32 bits are clipped-off when storing
+
+    function _encodeFlowData
+    (
+        FlowData memory flowData
+    )
+        internal pure
+        returns(bytes32[] memory data)
+    {
+        // enable these for debugging
+        // assert(flowData.deposit & type(uint32).max == 0);
+        // assert(flowData.owedDeposit & type(uint32).max == 0);
+        data = new bytes32[](1);
+        data[0] = bytes32(
+            ((uint256(flowData.timestamp)) << 224) |
+            ((uint256(uint96(flowData.flowRate)) << 128)) |
+            (uint256(flowData.deposit) >> 32 << 64) |
+            (uint256(flowData.owedDeposit) >> 32)
+        );
+    }
+
+    function _decodeFlowData
+    (
+        uint256 wordA
+    )
+        internal pure
+        returns(bool exist, FlowData memory flowData)
+    {
+        exist = wordA > 0;
+        if (exist) {
+            flowData.timestamp = uint32(wordA >> 224);
+            // NOTE because we are upcasting from type(uint96).max to uint256 to int256, we do not need to use safecast
+            flowData.flowRate = int96(int256(wordA >> 128) & int256(uint256(type(uint96).max)));
+            flowData.deposit = ((wordA >> 64) & uint256(type(uint64).max)) << 32 /* recover clipped bits*/;
+            flowData.owedDeposit = (wordA & uint256(type(uint64).max)) << 32 /* recover clipped bits*/;
+        }
+    }
+
+    /**************************************************************************
+     * 3P's Pure Functions
+     *************************************************************************/
+
+    //
+    // Data packing:
+    //
+    // WORD A: |    reserved    | patricianPeriod | liquidationPeriod |
+    //         |      192       |        32       |         32        |
+    //
+    // NOTE:
+    // - liquidation period has 32 bits length
+    // - patrician period also has 32 bits length
+
+    function _decode3PsData(
+        IFluidspeedToken token
+    )
+        internal view
+        returns(uint256 liquidationPeriod, uint256 patricianPeriod)
+    {
+        IFluidspeed host = IFluidspeed(token.getHost());
+        IFluidspeedGovernance gov = IFluidspeedGovernance(host.getGovernance());
+        uint256 pppConfig = gov.getConfigAsUint256(host, token, CFAV1_PPP_CONFIG_KEY);
+        (liquidationPeriod, patricianPeriod) = FluidspeedGovernanceConfigs.decodePPPConfig(pppConfig);
+    }
+
+    function _isPatricianPeriod(
+        int256 availableBalance,
+        int256 signedTotalCFADeposit,
+        uint256 liquidationPeriod,
+        uint256 patricianPeriod
+    )
+        internal pure
+        returns (bool)
+    {
+        int256 totalRewardLeft = availableBalance + signedTotalCFADeposit;
+        int256 totalCFAOutFlowrate = signedTotalCFADeposit / int256(liquidationPeriod);
+        // divisor cannot be zero with existing outflow
+        return totalRewardLeft / totalCFAOutFlowrate > int256(liquidationPeriod - patricianPeriod);
+    }
+
+    /**************************************************************************
+     * ACL Pure Functions
+     *************************************************************************/
+
+    function _generateFlowOperatorId(address sender, address flowOperator) private pure returns(bytes32 id) {
+        return keccak256(abi.encode("flowOperator", sender, flowOperator));
+    }
+
+    //
+    // Data packing:
+    //
+    // WORD A: | reserved  | permissions | reserved | flowRateAllowance |
+    //         | 120       | 8           | 32       | 96                |
+    //
+    // NOTE:
+    // - flowRateAllowance has 96 bits length
+    // - permissions is an 8-bit octo bitmask
+    // - ...0 0 0 (...delete update create)
+
+    function _encodeFlowOperatorData
+    (
+        FlowOperatorData memory flowOperatorData
+    )
+        internal pure
+        returns(bytes32[] memory data)
+    {
+        assert(flowOperatorData.flowRateAllowance >= 0); // flowRateAllowance must not be less than 0
+        data = new bytes32[](1);
+        data[0] = bytes32(
+            uint256(flowOperatorData.permissions) << 128 |
+            uint256(int256(flowOperatorData.flowRateAllowance))
+        );
+    }
+
+    function _decodeFlowOperatorData
+    (
+        uint256 wordA
+    )
+        internal pure
+        returns(bool exist, FlowOperatorData memory flowOperatorData)
+    {
+        exist = wordA > 0;
+        if (exist) {
+            // NOTE: For safecast, doing extra bitmasking to not to have any trust assumption of token storage
+            flowOperatorData.flowRateAllowance = int96(int256(wordA & uint256(int256(type(int96).max))));
+            flowOperatorData.permissions = uint8(wordA >> 128) & type(uint8).max;
+        }
+    }
+
+    function _getBooleanFlowOperatorPermissions
+    (
+        uint8 permissions,
+        FlowChangeType flowChangeType
+    )
+        internal pure
+        returns (bool flowchangeTypeAllowed)
+    {
+        if (flowChangeType == FlowChangeType.CREATE_FLOW) {
+            flowchangeTypeAllowed = permissions & uint8(1) == 1;
+        } else if (flowChangeType == FlowChangeType.UPDATE_FLOW) {
+            flowchangeTypeAllowed = (permissions >> 1) & uint8(1) == 1;
+        } else { /** flowChangeType === FlowChangeType.DELETE_FLOW */
+            flowchangeTypeAllowed = (permissions >> 2) & uint8(1) == 1;
+        }
+    }
 }
