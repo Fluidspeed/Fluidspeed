@@ -499,6 +499,47 @@ abstract contract FluidspeedGovernanceBase is IFluidspeedGovernance
             host, IFluidspeedToken(address(0)),
             FluidspeedGovernanceConfigs.getAppFactoryConfigKey(factory)) == 1;
     }
+    
+    /**
+     * @dev allows the given factory to register new apps without requiring onetime keys
+     * @param factory must be an initialized contract
+     */
+    function authorizeAppFactory(
+        IFluidspeed host,
+        address factory
+    )
+        external
+    {
+        // check if contract
+        {
+            uint256 cs;
+            // solhint-disable-next-line no-inline-assembly
+            assembly { cs := extcodesize(factory) }
+            if (cs == 0) revert FluidspeedErrors.MUST_BE_CONTRACT(FluidspeedErrors.SF_GOV_MUST_BE_CONTRACT);
+        }
+        _setConfig(
+            host, IFluidspeedToken(address(0)),
+            FluidspeedGovernanceConfigs.getAppFactoryConfigKey(factory),
+            1);
+        emit AppFactoryAuthorizationChanged(host, factory, true);
+    }
+
+    /**
+     * @dev withdraws authorization from a factory to register new apps.
+     * Doesn't affect apps previously registered by the factory.
+     */
+    function unauthorizeAppFactory(
+        IFluidspeed host,
+        address factory
+    )
+        external
+    {
+        _clearConfig(
+            host, IFluidspeedToken(address(0)),
+            FluidspeedGovernanceConfigs.getAppFactoryConfigKey(factory));
+        emit AppFactoryAuthorizationChanged(host, factory, false);
+    }
+
 
     modifier onlyAuthorized(IFluidspeed host) {
         _requireAuthorised(host);
