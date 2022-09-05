@@ -10,7 +10,6 @@ import { IPureSuperTokenCustom } from "../interfaces/tokens/IPureSuperToken.sol"
 import { UUPSProxy } from "../upgradability/UUPSProxy.sol";
 import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
-
 /**
  * @title Native SuperToken custom super token implementation
  * @author Fluidspeed
