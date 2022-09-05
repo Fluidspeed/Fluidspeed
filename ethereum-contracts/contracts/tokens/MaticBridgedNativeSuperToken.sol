@@ -11,8 +11,6 @@ import { UUPSProxy } from "../upgradability/UUPSProxy.sol";
 
 import { IFluidspeed } from "../interfaces/fluifspeed/IFluidspeed.sol";
 
-
-
 contract MaticBridgedNativeSuperTokenProxy is IMaticBridgedNativeSuperTokenCustom, CustomSuperTokenBase, UUPSProxy {
     address public childChainManager;
 
