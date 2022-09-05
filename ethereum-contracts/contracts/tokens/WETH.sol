@@ -9,7 +9,6 @@ from "../interfaces/fluidspeed/CustomSuperTokenBase.sol";
 import { IWETHCustom } from "../interfaces/tokens/IWETH.sol";
 import { UUPSProxy } from "../upgradability/UUPSProxy.sol";
 
-
 contract WETHProxy is IWETHCustom, CustomSuperTokenBase, UUPSProxy {
     event TokenUpgraded(address indexed account, uint256 amount);
     event TokenDowngraded(address indexed account, uint256 amount);
