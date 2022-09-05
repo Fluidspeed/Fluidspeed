@@ -5,7 +5,7 @@ import {
     ISuperToken,
     CustomSuperTokenBase
 }
-from "../interfaces/superfluid/CustomSuperTokenBase.sol";
+from "../interfaces/fluidspeed/CustomSuperTokenBase.sol";
 import { IWETHCustom } from "../interfaces/tokens/IWETH.sol";
 import { UUPSProxy } from "../upgradability/UUPSProxy.sol";
 
