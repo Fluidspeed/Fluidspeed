@@ -13,3 +13,5 @@ It is arguable whether payments with cryptocurrency are more convenient and flex
 
 
 ## How it work?
+
+The tool leverages a protocol in which a smart contract agreement is opened once in order to continuously stream a payment from your wallet to the wallet of your counterparty. Essentially, instead of paying for a subscription or salary on a periodic basis, you would pay for it on a continuous basis; every second, some predefined value will be transmitted in real-time in an ongoing gasless transaction.
